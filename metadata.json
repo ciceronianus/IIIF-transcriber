@@ -1,0 +1,6 @@
+{
+  "name": "IIIF Document Transcriber",
+  "description": "A pure JavaScript web application for opening IIIF documents from disk or URL, manual page transcription, adding general page notes, filtering text layers, bookmarking, and saving manifest.json according to IIIF 3.0 and W3C Web Annotation specifications.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
