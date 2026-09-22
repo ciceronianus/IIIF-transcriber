@@ -1221,14 +1221,14 @@ function attachEventHandlers() {
       const urlInput = document.getElementById('input-url');
       const corsCheckbox = document.getElementById('checkbox-cors');
       if (urlInput) {
-        loadManifestFromUrlAndSave(urlInput.value, corsCheckbox ? corsCheckbox.checked : true);
+        loadManifestFromUrl(urlInput.value, corsCheckbox ? corsCheckbox.checked : true);
       }
     };
   }
 
   document.querySelectorAll('.btn-sample').forEach(btn => {
     btn.onclick = () => {
-      loadManifestFromUrlAndSave(btn.dataset.url, true);
+      loadManifestFromUrl(btn.dataset.url, true);
     };
   });
 
@@ -1364,33 +1364,6 @@ async function saveManifestAsLocalCopy() {
   } catch (err) {
     if (err.name !== 'AbortError') updateState({ saveStatus: `Save failed: ${err.message}` });
     return false;
-  }
-}
-
-async function loadManifestFromUrlAndSave(url, useProxy) {
-  let fileHandle = null;
-  if (window.showSaveFilePicker) {
-    try {
-      fileHandle = await window.showSaveFilePicker({
-        suggestedName: state.fileName || 'manifest.json',
-        types: [{ description: 'IIIF manifest', accept: { 'application/json': ['.json'] } }]
-      });
-    } catch (err) {
-      if (err.name !== 'AbortError') updateState({ loadError: `Failed to choose local manifest: ${err.message}` });
-      return;
-    }
-  }
-
-  await loadManifestFromUrl(url, useProxy);
-  if (state.manifest && !state.loadError) {
-    if (fileHandle) {
-      state.fileHandle = fileHandle;
-      connectedFileHandle = fileHandle;
-      state.fileName = fileHandle.name;
-      await saveManifestToFile();
-    } else {
-      await saveManifestAsLocalCopy();
-    }
   }
 }
 
