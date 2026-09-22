@@ -5,32 +5,11 @@
 
 export const SAMPLE_MANIFESTS = [
   {
-    id: 'bodleian-ms-bodl-264',
-    title: 'Romance of Alexander (Bodleian MS. Bodl. 264)',
-    institution: 'Bodleian Library, Oxford',
-    url: 'https://iiif.bodleian.ox.ac.uk/iiif/manifest/693ec881-2a91-4dfc-bbbe-5c6020c6a51d.json',
-    description: '14th-century illuminated manuscript with rich decorative marginalia and French prose romance.'
-  },
-  {
-    id: 'stanford-beowulf',
-    title: 'The Bayeux Tapestry / Historical specimen',
-    institution: 'Stanford University Libraries',
-    url: 'https://purl.stanford.edu/jr903ng8608/iiif/manifest',
-    description: 'High-resolution digitized folio from academic special collections.'
-  },
-  {
-    id: 'harvard-manuscript',
-    title: 'Houghton Library Manuscript',
-    institution: 'Harvard University',
-    url: 'https://iiif.lib.harvard.edu/manifests/drs:4997399',
-    description: 'Medieval Latin manuscript leaf collection with calligraphic script.'
-  },
-  {
-    id: 'wellcome-herbal',
-    title: 'Medical & Botanical Herbal Folios',
-    institution: 'Wellcome Collection',
-    url: 'https://wellcomecollection.org/works/b382zfe2/items',
-    description: 'Illustrated herbal treatise with handwritten medicinal transcriptions.'
+    id: 'manuscriptorium-default',
+    title: 'Manuscriptorium sample manifest',
+    institution: 'Manuscriptorium',
+    url: 'https://collectiones.manuscriptorium.com/assorted/LILIEN/SLA___/7/LILIEN-SLA___HS_147______149UF47-en/?lang=en',
+    description: 'Default IIIF manifest sample.'
   }
 ];
 
@@ -262,72 +241,6 @@ export function parseIIIFManifest(json, sourceUrl = '') {
     canvases,
     rawManifest: json
   };
-}
-
-export function createLocalManifestTemplate(title = 'Illuminated Manuscript Transcriber') {
-  const sampleImages = [
-    {
-      label: 'Folio 1r - Frontispiece Miniature',
-      url: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=1600&q=80',
-      width: 1600,
-      height: 2200
-    },
-    {
-      label: 'Folio 1v - Decorated Initials',
-      url: 'https://images.unsplash.com/photo-1461360370896-922624d12aa1?auto=format&fit=crop&w=1600&q=80',
-      width: 1600,
-      height: 2150
-    },
-    {
-      label: 'Folio 2r - Calligraphic Script Leaf',
-      url: 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&w=1600&q=80',
-      width: 1600,
-      height: 2400
-    }
-  ];
-
-  const now = Date.now();
-  const manifestId = `https://example.org/iiif/manifest-${now}`;
-
-  const canvases = sampleImages.map((img, idx) => ({
-    id: `${manifestId}/canvas/p${idx + 1}`,
-    type: 'Canvas',
-    label: { en: [img.label] },
-    width: img.width,
-    height: img.height,
-    items: [
-      {
-        id: `${manifestId}/canvas/p${idx + 1}/page/1`,
-        type: 'AnnotationPage',
-        items: [
-          {
-            id: `${manifestId}/canvas/p${idx + 1}/annotation/painting`,
-            type: 'Annotation',
-            motivation: 'painting',
-            body: {
-              id: img.url,
-              type: 'Image',
-              format: 'image/jpeg',
-              width: img.width,
-              height: img.height
-            },
-            target: `${manifestId}/canvas/p${idx + 1}`
-          }
-        ]
-      }
-    ]
-  }));
-
-  const rawManifest = {
-    '@context': 'http://iiif.io/api/presentation/3/context.json',
-    id: manifestId,
-    type: 'Manifest',
-    label: { en: [title] },
-    summary: { en: ['Locally created IIIF Presentation 3.0 document ready for manual page transcription.'] },
-    items: canvases
-  };
-
-  return parseIIIFManifest(rawManifest, 'local-template');
 }
 
 

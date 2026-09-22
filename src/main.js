@@ -1,12 +1,12 @@
 /**
  * IIIF Document Transcriber - Pure Vanilla JavaScript Application
  * Supports IIIF Presentation API 2.0, 2.1, and 3.0.
- * Features: Manifest loader (disk/URL/samples), interactive canvas viewer (zoom, pan, rotate),
+ * Features: Manifest loader (disk/URL/sample), interactive canvas viewer (zoom, pan, rotate),
  * searchable canvas sidebar with filter tabs and bookmarks, transcription & page notes editor,
  * and JSON preview modal with tabs for Full Manifest vs Current Page Canvas.
  */
 
-import { parseIIIFManifest, createLocalManifestTemplate, SAMPLE_MANIFESTS } from './lib/iiifParser.js';
+import { parseIIIFManifest, SAMPLE_MANIFESTS } from './lib/iiifParser.js';
 import { buildIIIFManifest, exportManifestJsonString, downloadJsonFile } from './lib/manifestExporter.js';
 import JSZip from 'https://esm.sh/jszip@3.10.1';
 import Prism from 'https://esm.sh/prismjs@1.29.0';
@@ -43,11 +43,9 @@ let state = {
   isEditingZoom: false
 };
 
-// Initialize app with template manifest if none loaded
+// Start without loading a manifest so the user can choose one from the loader.
 function initApp() {
-  // Load specific default manifest for testing
-  const defaultUrl = 'https://collectiones.manuscriptorium.com/assorted/LILIEN/SLA___/7/LILIEN-SLA___HS_147______149UF47-en/?lang=en';
-  loadManifestFromUrl(defaultUrl, true);
+  render();
 }
 
 // State updater helper
