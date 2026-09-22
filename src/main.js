@@ -12,6 +12,8 @@ import JSZip from 'https://esm.sh/jszip@3.10.1';
 import Prism from 'https://esm.sh/prismjs@1.29.0';
 import 'https://esm.sh/prismjs@1.29.0/components/prism-json';
 
+let connectedFileHandle = null;
+
 // Application State
 let state = {
   manifest: null, // parsed manifest object or null
@@ -40,7 +42,11 @@ let state = {
   isJumpModalOpen: false,
   isExportModalOpen: false,
   transcriptionFontSize: Number(sessionStorage.getItem('transcriptionFontSize')) || 14,
-  isEditingZoom: false
+  isEditingZoom: false,
+  fileHandle: null,
+  fileName: '',
+  isDirty: false,
+  saveStatus: ''
 };
 
 // Start without loading a manifest so the user can choose one from the loader.
@@ -56,6 +62,23 @@ function updateState(updater) {
     Object.assign(state, updater);
   }
   render();
+}
+
+function getSaveStatusText() {
+  if (state.saveStatus) return state.saveStatus;
+  if (state.isDirty) return 'Unsaved changes';
+  if (state.fileName) return `Saved to ${state.fileName}`;
+  return 'Save a local copy to edit';
+}
+
+function markManifestDirty() {
+  state.isDirty = true;
+  state.saveStatus = '';
+  const statusEl = document.getElementById('save-status');
+  if (statusEl) {
+    statusEl.className = 'text-[10px] text-amber-600';
+    statusEl.textContent = getSaveStatusText();
+  }
 }
 
 // --- RENDERING ---
@@ -98,6 +121,7 @@ function render() {
             <p class="text-xs text-gray-500 truncate max-w-md">
               ${manifest ? escapeHtml(manifest.label) : 'No manifest loaded'}
             </p>
+            ${manifest ? `<p id="save-status" class="text-[10px] ${state.isDirty ? 'text-amber-600' : 'text-gray-400'}">${escapeHtml(getSaveStatusText())}</p>` : ''}
           </div>
         </div>
 
@@ -112,6 +136,13 @@ function render() {
           </button>
 
           ${manifest ? `
+            <button
+              id="btn-save-manifest"
+              class="p-1.5 rounded-md border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 cursor-pointer transition-colors"
+              title="${state.fileHandle ? 'Save manifest to local file' : 'Save a local copy'}"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 20h14a1 1 0 001-1V7.5L16.5 4H5a1 1 0 00-1 1v14a1 1 0 001 1zm3-16v5h7V4M8 20v-5h8v5"></path></svg>
+            </button>
             <button
               id="btn-view-json"
               class="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 transition-colors cursor-pointer"
@@ -696,6 +727,12 @@ function renderLoaderModal() {
             </div>
           ` : ''}
 
+          ${(!window.showOpenFilePicker || !window.showSaveFilePicker || window.location.protocol === 'file:') ? `
+            <div class="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+              Direct saving requires a Chromium browser with File System Access enabled. Open this app from a local web server, for example <strong>http://127.0.0.1:8000</strong>. Firefox-based browsers can only download a copy.
+            </div>
+          ` : ''}
+
           ${state.loaderTab === 'disk' ? `
             <div class="space-y-4">
               <div
@@ -707,8 +744,11 @@ function renderLoaderModal() {
                 </div>
                 <p class="text-sm font-semibold text-gray-900 mb-1">Drag and drop manifest.json file here</p>
                 <p class="text-xs text-gray-500 mb-4">Open any valid IIIF Presentation 2.x or 3.0 manifest</p>
-                <label class="px-4 py-2 rounded-lg bg-gray-900 hover:bg-gray-800 text-white text-xs font-semibold cursor-pointer shadow-xs transition-colors">
-                  Select file from disk
+                <button id="btn-pick-file" type="button" class="px-4 py-2 rounded-lg bg-gray-900 hover:bg-gray-800 text-white text-xs font-semibold cursor-pointer shadow-xs transition-colors">
+                  Open file from disk
+                </button>
+                <label class="text-xs text-gray-500 underline cursor-pointer">
+                  Use browser fallback
                   <input id="file-input" type="file" accept=".json,application/json" class="hidden" />
                 </label>
               </div>
@@ -839,6 +879,9 @@ function attachEventHandlers() {
   // Header buttons
   const btnOpen = document.getElementById('btn-open-manifest');
   if (btnOpen) btnOpen.onclick = () => updateState({ isLoaderOpen: true, loadError: null });
+
+  const btnSaveManifest = document.getElementById('btn-save-manifest');
+  if (btnSaveManifest) btnSaveManifest.onclick = saveCurrentManifest;
 
   const btnToggleLayout = document.getElementById('btn-toggle-layout');
   if (btnToggleLayout) {
@@ -992,6 +1035,7 @@ function attachEventHandlers() {
       const idx = parseInt(btn.dataset.index, 10);
       if (state.manifest && state.manifest.canvases[idx]) {
         state.manifest.canvases[idx].isBookmarked = !state.manifest.canvases[idx].isBookmarked;
+        markManifestDirty();
         render();
       }
     };
@@ -1093,6 +1137,7 @@ function attachEventHandlers() {
   if (btnToggleBookmarkActive && activeCanvas) {
     btnToggleBookmarkActive.onclick = () => {
       activeCanvas.isBookmarked = !activeCanvas.isBookmarked;
+      markManifestDirty();
       render();
     };
   }
@@ -1110,6 +1155,7 @@ function attachEventHandlers() {
       } else {
         activeCanvas.transcriptions[0].text = val;
       }
+      markManifestDirty();
       updateLineNumbers(textareaTranscription);
     };
 
@@ -1128,6 +1174,7 @@ function attachEventHandlers() {
     textareaNote.oninput = (e) => {
       const val = e.target.value;
       activeCanvas.note = val;
+      markManifestDirty();
     };
   }
 
@@ -1153,6 +1200,9 @@ function attachEventHandlers() {
     };
   }
 
+  const btnPickFile = document.getElementById('btn-pick-file');
+  if (btnPickFile) btnPickFile.onclick = pickLocalManifest;
+
   const dropzone = document.getElementById('dropzone');
   if (dropzone) {
     dropzone.ondragover = (e) => { e.preventDefault(); dropzone.classList.add('border-gray-900', 'bg-gray-100'); };
@@ -1171,14 +1221,14 @@ function attachEventHandlers() {
       const urlInput = document.getElementById('input-url');
       const corsCheckbox = document.getElementById('checkbox-cors');
       if (urlInput) {
-        loadManifestFromUrl(urlInput.value, corsCheckbox ? corsCheckbox.checked : true);
+        loadManifestFromUrlAndSave(urlInput.value, corsCheckbox ? corsCheckbox.checked : true);
       }
     };
   }
 
   document.querySelectorAll('.btn-sample').forEach(btn => {
     btn.onclick = () => {
-      loadManifestFromUrl(btn.dataset.url, true);
+      loadManifestFromUrlAndSave(btn.dataset.url, true);
     };
   });
 
@@ -1222,19 +1272,126 @@ function updateLineNumbers(textarea) {
   gutter.scrollTop = textarea.scrollTop;
 }
 
+async function pickLocalManifest() {
+  if (!window.showOpenFilePicker) {
+    document.getElementById('file-input')?.click();
+    return;
+  }
+
+  try {
+    const [fileHandle] = await window.showOpenFilePicker({
+      types: [{ description: 'IIIF manifest', accept: { 'application/json': ['.json'] } }],
+      multiple: false,
+      mode: 'readwrite'
+    });
+    connectedFileHandle = fileHandle;
+    await loadManifestFile(await fileHandle.getFile(), fileHandle);
+  } catch (err) {
+    if (err.name !== 'AbortError') updateState({ loadError: `Failed to open manifest: ${err.message}` });
+  }
+}
+
 function handleFileLoad(file) {
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    try {
-      const json = JSON.parse(e.target.result);
-      const parsed = parseIIIFManifest(json, file.name);
-      updateState({ manifest: parsed, isLoaderOpen: false, activeCanvasIndex: 0, loadError: null });
-    } catch (err) {
-      updateState({ loadError: `Error parsing manifest file: ${err.message}` });
+  loadManifestFile(file, null);
+}
+
+async function loadManifestFile(file, fileHandle) {
+  try {
+    const json = JSON.parse(await file.text());
+    const parsed = parseIIIFManifest(json, file.name);
+    connectedFileHandle = fileHandle;
+    updateState({
+      manifest: parsed,
+      fileHandle,
+      fileName: file.name,
+      isDirty: false,
+      saveStatus: '',
+      isLoaderOpen: false,
+      activeCanvasIndex: 0,
+      loadError: null
+    });
+  } catch (err) {
+    updateState({ loadError: `Error parsing manifest file: ${err.message}` });
+  }
+}
+
+async function saveManifestToFile() {
+  const fileHandle = connectedFileHandle || state.fileHandle;
+  if (!state.manifest || !fileHandle) return;
+
+  try {
+    const permission = await fileHandle.requestPermission({ mode: 'readwrite' });
+    if (permission !== 'granted') {
+      throw new Error('Write permission was not granted for this file.');
     }
-  };
-  reader.onerror = () => updateState({ loadError: 'Failed to read file from disk.' });
-  reader.readAsText(file);
+    state.saveStatus = 'Saving...';
+    render();
+    const writable = await fileHandle.createWritable();
+    await writable.write(exportManifestJsonString(state.manifest));
+    await writable.close();
+    updateState({ isDirty: false, saveStatus: '' });
+  } catch (err) {
+    updateState({ saveStatus: `Save failed: ${err.message}` });
+  }
+}
+
+async function saveCurrentManifest() {
+  if (connectedFileHandle || state.fileHandle) {
+    await saveManifestToFile();
+  } else {
+    await saveManifestAsLocalCopy();
+  }
+}
+
+async function saveManifestAsLocalCopy() {
+  if (!state.manifest) return false;
+  if (!window.showSaveFilePicker) {
+    downloadJsonFile(exportManifestJsonString(state.manifest), state.fileName || 'manifest.json');
+    updateState({ saveStatus: 'Downloaded local copy', isDirty: false });
+    return false;
+  }
+
+  try {
+    const fileHandle = await window.showSaveFilePicker({
+      suggestedName: state.fileName || 'manifest.json',
+      types: [{ description: 'IIIF manifest', accept: { 'application/json': ['.json'] } }]
+    });
+    state.fileHandle = fileHandle;
+    connectedFileHandle = fileHandle;
+    state.fileName = fileHandle.name;
+    await saveManifestToFile();
+    return true;
+  } catch (err) {
+    if (err.name !== 'AbortError') updateState({ saveStatus: `Save failed: ${err.message}` });
+    return false;
+  }
+}
+
+async function loadManifestFromUrlAndSave(url, useProxy) {
+  let fileHandle = null;
+  if (window.showSaveFilePicker) {
+    try {
+      fileHandle = await window.showSaveFilePicker({
+        suggestedName: state.fileName || 'manifest.json',
+        types: [{ description: 'IIIF manifest', accept: { 'application/json': ['.json'] } }]
+      });
+    } catch (err) {
+      if (err.name !== 'AbortError') updateState({ loadError: `Failed to choose local manifest: ${err.message}` });
+      return;
+    }
+  }
+
+  await loadManifestFromUrl(url, useProxy);
+  if (state.manifest && !state.loadError) {
+    if (fileHandle) {
+      state.fileHandle = fileHandle;
+      connectedFileHandle = fileHandle;
+      state.fileName = fileHandle.name;
+      await saveManifestToFile();
+    } else {
+      await saveManifestAsLocalCopy();
+    }
+  }
 }
 
 async function loadManifestFromUrl(url, useProxy) {
@@ -1262,7 +1419,8 @@ async function loadManifestFromUrl(url, useProxy) {
 
     const json = await response.json();
     const parsed = parseIIIFManifest(json, fetchUrl);
-    updateState({ manifest: parsed, isLoaderOpen: false, activeCanvasIndex: 0, isLoadingUrl: false, loadError: null });
+    connectedFileHandle = null;
+    updateState({ manifest: parsed, fileHandle: null, fileName: 'manifest.json', isDirty: true, saveStatus: 'Save a local copy to continue', isLoaderOpen: false, activeCanvasIndex: 0, isLoadingUrl: false, loadError: null });
   } catch (err) {
     updateState({ isLoadingUrl: false, loadError: `Failed to load manifest: ${err.message}. Try enabling CORS proxy.` });
   }
