@@ -1,40 +1,26 @@
 /**
  * IIIF Manifest Exporter Module (Pure JavaScript)
- * Generates valid IIIF Presentation API 3.0 Manifests according to standard specifications.
- * Ensures transcriptions are modeled as W3C Web Annotations with motivation "supplementing"
- * and bookmarks are modeled with motivation "bookmarking" & IIIF Range structures.
  */
 
-/**
- * Builds a valid IIIF Presentation 3.0 manifest object from the application state.
- */
 export function buildIIIFManifest(state) {
   const { id, label, description, canvases, rawManifest } = state;
   const manifestId = id || `https://example.org/iiif/manifest-${Date.now()}`;
 
-  // Keep existing manifest metadata if present
   const baseManifest = rawManifest && typeof rawManifest === 'object' ? { ...rawManifest } : {};
 
-  // Clean up legacy v2 top-level fields if migrating to v3
   delete baseManifest.sequences;
   delete baseManifest['@id'];
   delete baseManifest['@type'];
 
-  // Ensure standard IIIF v3 context
-  const context = 'http://iiif.io/api/presentation/3/context.json';
-
-  // Format manifest label according to IIIF v3
   const manifestLabel = typeof label === 'object' && label.en ? label : { en: [label || 'Untitled IIIF Document'] };
   const manifestSummary = description ? (typeof description === 'object' ? description : { en: [description] }) : undefined;
 
   const bookmarkedCanvasIds = [];
 
-  // Generate Canvases
   const items = canvases.map((canvas, index) => {
     const canvasId = canvas.id || `${manifestId}/canvas/p${index + 1}`;
     const canvasLabel = typeof canvas.label === 'object' ? canvas.label : { en: [canvas.label || `Page ${index + 1}`] };
 
-    // Preserve existing painting annotations or reconstruct standard painting annotation
     let paintingItems = [];
     if (canvas.rawCanvas?.items && Array.isArray(canvas.rawCanvas.items)) {
       paintingItems = canvas.rawCanvas.items;
@@ -62,10 +48,8 @@ export function buildIIIFManifest(state) {
       ];
     }
 
-    // Build annotations array (transcriptions and bookmarks)
     const annotationItems = [];
 
-    // 1. Textual Transcriptions (motivation: "supplementing")
     if (canvas.transcriptions && canvas.transcriptions.length > 0) {
       canvas.transcriptions.forEach((t, tIdx) => {
         if (!t.text || !t.text.trim()) return;
@@ -96,7 +80,6 @@ export function buildIIIFManifest(state) {
       });
     }
 
-    // 2. General Page Note (motivation: "commenting" according to W3C Web Annotation & IIIF Presentation 3.0)
     if (canvas.note && canvas.note.trim()) {
       annotationItems.push({
         id: `${canvasId}/annotation/note`,
@@ -112,7 +95,6 @@ export function buildIIIFManifest(state) {
       });
     }
 
-    // 3. Bookmark annotation (motivation: "bookmarking" according to W3C Web Annotation spec)
     if (canvas.isBookmarked) {
       bookmarkedCanvasIds.push(canvasId);
       annotationItems.push({
@@ -128,100 +110,74 @@ export function buildIIIFManifest(state) {
       });
     }
 
-    // Assemble Canvas object
+    let annotations = canvas.rawCanvas?.annotations || [];
+    if (annotationItems.length > 0) {
+      const userAnnoPage = {
+        id: `${canvasId}/annotations/user`,
+        type: 'AnnotationPage',
+        items: annotationItems
+      };
+      annotations = [userAnnoPage];
+    }
+
     const canvasObj = {
       id: canvasId,
       type: 'Canvas',
       label: canvasLabel,
-      width: canvas.width,
       height: canvas.height,
+      width: canvas.width,
       items: paintingItems
     };
 
-    // Attach summary if page note exists (standard IIIF Presentation 3.0 canvas summary)
     if (canvas.note && canvas.note.trim()) {
       const noteLang = canvas.noteLanguage || 'en';
       canvasObj.summary = { [noteLang]: [canvas.note.trim()] };
     }
 
-    // If there are annotations (transcriptions or bookmarks), attach AnnotationPage
-    if (annotationItems.length > 0) {
-      canvasObj.annotations = [
-        {
-          id: `${canvasId}/annotations/page-1`,
-          type: 'AnnotationPage',
-          items: annotationItems
-        }
-      ];
+    if (annotations.length > 0) {
+      canvasObj.annotations = annotations;
     }
 
     return canvasObj;
   });
 
-  // Structures for Ranges (e.g. Bookmark collection)
-  const structures = [];
-  if (baseManifest.structures && Array.isArray(baseManifest.structures)) {
-    // Preserve other ranges, but update bookmarks range
-    baseManifest.structures.forEach(range => {
-      const rangeLabel = range.label?.en ? range.label.en[0] : '';
-      if (!rangeLabel.toLowerCase().includes('bookmark')) {
-        structures.push(range);
-      }
-    });
-  }
-
-  if (bookmarkedCanvasIds.length > 0) {
-    structures.push({
-      id: `${manifestId}/range/bookmarks`,
-      type: 'Range',
-      label: { en: ['Bookmarked Pages'] },
-      behavior: ['bookmarks'],
-      items: bookmarkedCanvasIds.map(cid => ({
-        id: cid,
-        type: 'Canvas'
-      }))
-    });
-  }
-
-  const result = {
-    '@context': context,
+  const finalManifest = {
+    '@context': 'http://iiif.io/api/presentation/3/context.json',
     id: manifestId,
     type: 'Manifest',
     label: manifestLabel,
+    ...(manifestSummary ? { summary: manifestSummary } : {}),
+    ...baseManifest,
     items: items
   };
 
-  if (manifestSummary) {
-    result.summary = manifestSummary;
+  if (bookmarkedCanvasIds.length > 0) {
+    if (!finalManifest.structures) {
+      finalManifest.structures = [];
+    }
+    finalManifest.structures.push({
+      id: `${manifestId}/range/bookmarks`,
+      type: 'Range',
+      label: { en: ['Bookmarks'] },
+      items: bookmarkedCanvasIds.map(cid => ({ id: cid, type: 'Canvas' }))
+    });
   }
 
-  if (structures.length > 0) {
-    result.structures = structures;
-  }
-
-  // Preserve any top-level metadata or provider fields from original if present
-  if (baseManifest.metadata) result.metadata = baseManifest.metadata;
-  if (baseManifest.provider) result.provider = baseManifest.provider;
-  if (baseManifest.rights) result.rights = baseManifest.rights;
-  if (baseManifest.requiredStatement) result.requiredStatement = baseManifest.requiredStatement;
-
-  return result;
+  return finalManifest;
 }
 
-/**
- * Serializes the manifest into a formatted JSON string.
- */
-export function exportManifestJsonString(state, space = 2) {
-  const manifestObj = buildIIIFManifest(state);
-  return JSON.stringify(manifestObj, null, space);
+export function exportManifestJsonString(state) {
+  const manifest = buildIIIFManifest(state);
+  return JSON.stringify(manifest, null, 2);
 }
 
-/**
- * Initiates browser download of the manifest as manifest.json
- */
-export function downloadManifestJson(state, filename = 'manifest.json') {
-  const jsonStr = exportManifestJsonString(state);
-  const blob = new Blob([jsonStr], { type: 'application/ld+json;charset=utf-8' });
+export function exportCanvasJsonString(canvas) {
+  if (!canvas) return '{}';
+  return JSON.stringify(canvas.rawCanvas || canvas, null, 2);
+}
+
+export function downloadJsonFile(jsonString, filename = 'manifest.json') {
+  const blob = new Blob([jsonString], { type: 'application/ld+json;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -231,3 +187,9 @@ export function downloadManifestJson(state, filename = 'manifest.json') {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+export function downloadManifestJson(state, filename = 'manifest.json') {
+  const jsonString = exportManifestJsonString(state);
+  downloadJsonFile(jsonString, filename);
+}
+

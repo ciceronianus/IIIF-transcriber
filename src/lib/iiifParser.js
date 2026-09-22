@@ -1,7 +1,6 @@
 /**
  * IIIF Parser & Normalizer Module (Pure JavaScript)
  * Supports IIIF Presentation API 2.0, 2.1, and 3.0.
- * Normalizes manifests into a standard representation for editing and viewer display.
  */
 
 export const SAMPLE_MANIFESTS = [
@@ -35,9 +34,6 @@ export const SAMPLE_MANIFESTS = [
   }
 ];
 
-/**
- * Extracts a localized string from an IIIF v2 or v3 label/description structure.
- */
 export function getLocalizedText(prop, defaultVal = 'Untitled') {
   if (!prop) return defaultVal;
   if (typeof prop === 'string') return prop;
@@ -45,7 +41,6 @@ export function getLocalizedText(prop, defaultVal = 'Untitled') {
     return prop.map(item => getLocalizedText(item, '')).filter(Boolean).join(' ') || defaultVal;
   }
   if (typeof prop === 'object') {
-    // IIIF v3: { "en": ["Value"], "none": ["Value"], "@value": "Value" }
     if (prop['@value']) return prop['@value'];
     const keys = Object.keys(prop);
     if (keys.length > 0) {
@@ -57,13 +52,23 @@ export function getLocalizedText(prop, defaultVal = 'Untitled') {
   return defaultVal;
 }
 
-/**
- * Extracts the image URL for a canvas (IIIF v2 or v3).
- */
+function getServiceId(service) {
+  if (!service) return null;
+  if (Array.isArray(service)) {
+    for (const s of service) {
+      const id = getServiceId(s);
+      if (id) return id;
+    }
+    return null;
+  }
+  if (typeof service === 'string') return service;
+  return service['@id'] || service.id || null;
+}
+
 export function getCanvasImageUrl(canvas) {
   if (!canvas) return null;
 
-  // IIIF v3 structure: canvas.items[0].items[0].body
+  // IIIF v3
   if (canvas.items && canvas.items.length > 0) {
     const page = canvas.items[0];
     if (page.items && page.items.length > 0) {
@@ -71,11 +76,10 @@ export function getCanvasImageUrl(canvas) {
       const body = painting.body;
       if (body) {
         if (body.id) {
-          // If image service is available, construct optimal URL
           const service = body.service;
           const serviceId = getServiceId(service);
           if (serviceId) {
-            return `${serviceId.replace(/\/info\.json$/, '')}/full/max/0/default.jpg`;
+            return `${serviceId.replace(/\/info\.json$/, '')}/full/1600,/0/default.jpg`;
           }
           return body.id;
         }
@@ -83,7 +87,7 @@ export function getCanvasImageUrl(canvas) {
     }
   }
 
-  // IIIF v2 structure: canvas.images[0].resource
+  // IIIF v2
   if (canvas.images && canvas.images.length > 0) {
     const img = canvas.images[0];
     if (img.resource) {
@@ -91,292 +95,185 @@ export function getCanvasImageUrl(canvas) {
       const service = res.service;
       const serviceId = getServiceId(service);
       if (serviceId) {
-        return `${serviceId.replace(/\/info\.json$/, '')}/full/full/0/default.jpg`;
+        return `${serviceId.replace(/\/info\.json$/, '')}/full/1600,/0/default.jpg`;
       }
       if (res['@id']) return res['@id'];
       if (res.id) return res.id;
     }
   }
 
-  // Fallback thumbnail or direct id if image
-  if (canvas.thumbnail) {
-    const thumbUrl = typeof canvas.thumbnail === 'string' ? canvas.thumbnail : (canvas.thumbnail.id || canvas.thumbnail['@id']);
-    if (thumbUrl) return thumbUrl;
-  }
-
   return null;
 }
 
-/**
- * Helper to get service ID from IIIF service descriptor
- */
-function getServiceId(service) {
-  if (!service) return null;
-  if (Array.isArray(service)) {
-    return getServiceId(service[0]);
+export function getThumbnailUrl(canvas, imageUrl) {
+  if (!imageUrl) return null;
+  if (imageUrl.includes('/full/')) {
+    return imageUrl.replace(/\/full\/[^/]+\//, '/full/200,/');
   }
-  if (typeof service === 'string') return service;
-  if (typeof service === 'object') {
-    return service.id || service['@id'] || null;
+  if (imageUrl.includes('unsplash.com')) {
+    return imageUrl.replace(/w=\d+/, 'w=200').replace(/q=\d+/, 'q=60');
   }
-  return null;
+  return imageUrl;
 }
 
-/**
- * Extracts thumbnail URL for a canvas
- */
-export function getCanvasThumbnailUrl(canvas) {
-  if (canvas.thumbnail) {
-    if (typeof canvas.thumbnail === 'string') return canvas.thumbnail;
-    if (Array.isArray(canvas.thumbnail) && canvas.thumbnail.length > 0) {
-      const t = canvas.thumbnail[0];
-      return t.id || t['@id'] || null;
-    }
-    if (canvas.thumbnail.id) return canvas.thumbnail.id;
-    if (canvas.thumbnail['@id']) return canvas.thumbnail['@id'];
+export function parseIIIFManifest(json, sourceUrl = '') {
+  if (!json || typeof json !== 'object') {
+    throw new Error('Invalid IIIF manifest JSON structure.');
   }
 
-  // Generate thumbnail from main image service if possible
-  const mainImg = getCanvasImageUrl(canvas);
-  if (mainImg && mainImg.includes('/full/')) {
-    return mainImg.replace(/\/full\/(max|full)\/0\//, '/full/!200,200/0/');
-  }
-  return mainImg;
-}
+  const id = json.id || json['@id'] || sourceUrl || `https://example.org/iiif/manifest-${Date.now()}`;
+  const label = getLocalizedText(json.label, 'Untitled IIIF Document');
+  const description = getLocalizedText(json.description || json.summary, '');
 
-/**
- * Extracts textual annotations and bookmarks from a canvas.
- * Handles both IIIF v3 (canvas.annotations) and IIIF v2 (canvas.otherContent).
- */
-export function extractCanvasAnnotations(canvas) {
-  const transcriptions = [];
-  let isBookmarked = false;
-  let note = '';
-  let noteLanguage = 'en';
-
-  // Check canvas summary or description for note if present
-  if (canvas.summary) {
-    note = getLocalizedText(canvas.summary, '');
-  } else if (canvas.description && typeof canvas.description === 'string') {
-    note = canvas.description;
+  let rawCanvases = [];
+  if (json.items && Array.isArray(json.items)) {
+    rawCanvases = json.items;
+  } else if (json.sequences && Array.isArray(json.sequences)) {
+    const seq = json.sequences[0];
+    if (seq && seq.canvases && Array.isArray(seq.canvases)) {
+      rawCanvases = seq.canvases;
+    }
   }
 
-  const processAnno = (anno, pageId = '') => {
-    if (!anno) return;
-
-    // Check motivation
-    const motivation = anno.motivation || anno['@type'] || '';
-    const isBookmark = motivation === 'bookmarking' || motivation.includes('bookmarking');
-    if (isBookmark) {
-      isBookmarked = true;
-      return;
+  const canvases = rawCanvases.map((canvas, index) => {
+    const canvasId = canvas.id || canvas['@id'] || `${id}/canvas/p${index + 1}`;
+    const canvasLabel = getLocalizedText(canvas.label, `Page ${index + 1}`);
+    const imageUrl = getCanvasImageUrl(canvas);
+    let thumbnailUrl = imageUrl ? getThumbnailUrl(canvas, imageUrl) : null;
+    if (canvas.thumbnail) {
+      const thumb = Array.isArray(canvas.thumbnail) ? canvas.thumbnail[0] : canvas.thumbnail;
+      if (typeof thumb === 'string') thumbnailUrl = thumb;
+      else if (thumb['@id']) thumbnailUrl = thumb['@id'];
+      else if (thumb.id) thumbnailUrl = thumb.id;
     }
 
-    const isComment = motivation === 'commenting' || motivation.includes('commenting');
+    let width = canvas.width || 1200;
+    let height = canvas.height || 1600;
 
-    // Extract textual body
-    let text = '';
-    let language = 'en';
-    let format = 'text/plain';
+    if (!canvas.width && canvas.items?.[0]?.items?.[0]?.body?.width) {
+      width = canvas.items[0].items[0].body.width;
+      height = canvas.items[0].items[0].body.height;
+    } else if (!canvas.width && canvas.images?.[0]?.resource?.width) {
+      width = canvas.images[0].resource.width;
+      height = canvas.images[0].resource.height;
+    }
 
-    if (anno.body) {
-      if (typeof anno.body === 'string') {
-        text = anno.body;
-      } else if (Array.isArray(anno.body)) {
-        const textBody = anno.body.find(b => b.type === 'TextualBody' || b.format?.includes('text') || b.value);
-        if (textBody) {
-          text = textBody.value || '';
-          language = textBody.language || language;
-          format = textBody.format || format;
+    const transcriptions = [];
+    let isBookmarked = false;
+    let note = '';
+    let noteLanguage = 'en';
+
+    if (canvas.summary) {
+      const summaryText = getLocalizedText(canvas.summary, '');
+      if (summaryText) {
+        note = summaryText;
+      }
+    }
+
+    const annotations = [];
+    if (canvas.annotations && Array.isArray(canvas.annotations)) {
+      canvas.annotations.forEach(annoPage => {
+        if (annoPage.items && Array.isArray(annoPage.items)) {
+          annotations.push(...annoPage.items);
+        } else if (annoPage['@graph'] && Array.isArray(annoPage['@graph'])) {
+          annotations.push(...annoPage['@graph']);
         }
-      } else if (typeof anno.body === 'object') {
-        text = anno.body.value || anno.body.chars || '';
-        language = anno.body.language || language;
-        format = anno.body.format || format;
-      }
-    } else if (anno.resource) {
-      // IIIF v2
-      text = anno.resource.chars || anno.resource.value || '';
-      if (anno.resource.language) language = anno.resource.language;
-    }
-
-    // If motivation is commenting, it's a general page note!
-    if (isComment) {
-      if (text) {
-        note = text;
-        noteLanguage = language || 'en';
-      }
-      return;
-    }
-
-    // Determine target region (#xywh=x,y,w,h) if present
-    let target = anno.target || anno.on || '';
-    let targetRegion = null;
-    let canvasId = '';
-
-    if (typeof target === 'string') {
-      const hashIndex = target.indexOf('#xywh=');
-      if (hashIndex !== -1) {
-        canvasId = target.substring(0, hashIndex);
-        const xywhStr = target.substring(hashIndex + 6);
-        const [x, y, w, h] = xywhStr.split(',').map(n => parseFloat(n.trim()));
-        if (!isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
-          targetRegion = { x, y, w, h };
-        }
-      } else {
-        canvasId = target;
-      }
-    } else if (typeof target === 'object') {
-      const source = target.source || target.id || target['@id'] || '';
-      canvasId = typeof source === 'string' ? source : '';
-      if (target.selector) {
-        const val = target.selector.value || '';
-        const match = val.match(/xywh=([\d.]+),([\d.]+),([\d.]+),([\d.]+)/);
-        if (match) {
-          targetRegion = {
-            x: parseFloat(match[1]),
-            y: parseFloat(match[2]),
-            w: parseFloat(match[3]),
-            h: parseFloat(match[4])
-          };
-        }
-      }
-    }
-
-    if (text || targetRegion) {
-      transcriptions.push({
-        id: anno.id || anno['@id'] || `transcription-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-        text: text,
-        language: language || 'en',
-        format: format || 'text/plain',
-        targetRegion: targetRegion, // {x, y, w, h} or null for full canvas
-        canvasId: canvasId || canvas.id || canvas['@id']
       });
     }
-  };
 
-  // IIIF v3 annotations array: [ { type: "AnnotationPage", items: [...] } ]
-  if (canvas.annotations && Array.isArray(canvas.annotations)) {
-    canvas.annotations.forEach(item => {
-      if (item.type === 'AnnotationPage' && Array.isArray(item.items)) {
-        item.items.forEach(anno => processAnno(anno, item.id));
-      } else if (item.type === 'Annotation') {
-        processAnno(item);
+    annotations.forEach(anno => {
+      const motivation = anno.motivation || '';
+      const body = anno.body || {};
+      let text = '';
+      let language = 'en';
+      let format = 'text/plain';
+
+      if (body) {
+        if (typeof body === 'string') {
+          text = body;
+        } else if (body.value) {
+          text = body.value;
+          language = body.language || 'en';
+          format = body.format || 'text/plain';
+        } else if (body.chars) {
+          text = body.chars;
+          language = body.language || 'en';
+        } else if (Array.isArray(body)) {
+          text = body.map(b => b.value || b.chars || '').join(' ');
+        }
       }
-    });
-  }
 
-  // IIIF v2 otherContent array: [ { "@type": "sc:AnnotationList", resources: [...] } ]
-  if (canvas.otherContent && Array.isArray(canvas.otherContent)) {
-    canvas.otherContent.forEach(item => {
-      if (item.resources && Array.isArray(item.resources)) {
-        item.resources.forEach(anno => processAnno(anno, item['@id']));
+      const isComment = motivation === 'commenting' || motivation.includes('comment') || anno['@type'] === 'oa:Annotation';
+      const isBookmark = motivation === 'bookmarking' || motivation.includes('bookmark') || text.includes('Bookmarked') || text.includes('záložkou');
+
+      if (isBookmark) {
+        isBookmarked = true;
+        return;
       }
-    });
-  }
 
-  return { transcriptions, isBookmarked, note, noteLanguage };
-}
+      if (isComment) {
+        if (text) {
+          note = text;
+          noteLanguage = language || 'en';
+        }
+        return;
+      }
 
-/**
- * Parses any raw IIIF Manifest object into normalized internal format.
- */
-export function parseIIIFManifest(rawManifest, sourceUrl = '') {
-  if (!rawManifest || typeof rawManifest !== 'object') {
-    throw new Error('Invalid manifest data: expected a JSON object.');
-  }
+      if (text) {
+        let targetRegion = null;
+        const target = anno.target || anno['@target'];
+        if (typeof target === 'string' && target.includes('#xywh=')) {
+          const parts = target.split('#xywh=')[1].split(',').map(Number);
+          if (parts.length === 4 && !parts.some(isNaN)) {
+            targetRegion = { x: parts[0], y: parts[1], w: parts[2], h: parts[3] };
+          }
+        }
 
-  const isV3 = rawManifest['@context'] && (
-    typeof rawManifest['@context'] === 'string'
-      ? rawManifest['@context'].includes('presentation/3')
-      : Array.isArray(rawManifest['@context']) && rawManifest['@context'].some(c => typeof c === 'string' && c.includes('presentation/3'))
-  );
-
-  const manifestId = rawManifest.id || rawManifest['@id'] || `urn:manifest:${Date.now()}`;
-  const label = getLocalizedText(rawManifest.label, 'Untitled IIIF Document');
-  const description = getLocalizedText(rawManifest.summary || rawManifest.description, '');
-
-  // Extract raw canvases
-  let rawCanvases = [];
-  if (rawManifest.items && Array.isArray(rawManifest.items)) {
-    // IIIF v3 canvases are in items
-    rawCanvases = rawManifest.items.filter(item => item.type === 'Canvas');
-  } else if (rawManifest.sequences && Array.isArray(rawManifest.sequences) && rawManifest.sequences[0]?.canvases) {
-    // IIIF v2 canvases are in sequences[0].canvases
-    rawCanvases = rawManifest.sequences[0].canvases;
-  }
-
-  if (rawCanvases.length === 0) {
-    throw new Error('No Canvases (pages) found in this IIIF Manifest.');
-  }
-
-  // Check structures for bookmarks
-  const bookmarkedCanvasIds = new Set();
-  if (rawManifest.structures && Array.isArray(rawManifest.structures)) {
-    rawManifest.structures.forEach(range => {
-      const rangeLabel = getLocalizedText(range.label, '').toLowerCase();
-      if (rangeLabel.includes('bookmark') || (range.behavior && range.behavior.includes('bookmarks'))) {
-        const items = range.items || range.canvases || [];
-        items.forEach(item => {
-          const cid = typeof item === 'string' ? item : (item.id || item['@id']);
-          if (cid) bookmarkedCanvasIds.add(cid);
+        transcriptions.push({
+          id: anno.id || anno['@id'] || `transcription-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          text: text,
+          language: language || 'en',
+          format: format || 'text/plain',
+          targetRegion: targetRegion,
+          canvasId: canvasId
         });
       }
     });
-  }
-
-  // Normalize each canvas
-  const canvases = rawCanvases.map((rawCanvas, index) => {
-    const id = rawCanvas.id || rawCanvas['@id'] || `canvas-${index + 1}`;
-    const canvasLabel = getLocalizedText(rawCanvas.label, `Page ${index + 1}`);
-    const width = rawCanvas.width || 1000;
-    const height = rawCanvas.height || 1400;
-    const imageUrl = getCanvasImageUrl(rawCanvas);
-    const thumbnailUrl = getCanvasThumbnailUrl(rawCanvas);
-
-    const { transcriptions, isBookmarked: annoBookmarked, note, noteLanguage } = extractCanvasAnnotations(rawCanvas);
-    const isBookmarked = annoBookmarked || bookmarkedCanvasIds.has(id);
 
     return {
-      index,
-      id,
+      id: canvasId,
       label: canvasLabel,
       width,
       height,
       imageUrl,
       thumbnailUrl,
-      transcriptions, // array of { id, text, language, format, targetRegion, canvasId }
+      transcriptions,
       note: note || '',
       noteLanguage: noteLanguage || 'en',
       isBookmarked,
-      rawCanvas // keep reference to original canvas for preserving unedited properties
+      rawCanvas: canvas
     };
   });
 
   return {
-    isV3: Boolean(isV3),
-    id: manifestId,
+    id,
     label,
     description,
     canvases,
-    sourceUrl,
-    rawManifest
+    rawManifest: json
   };
 }
 
-/**
- * Creates a blank starter IIIF manifest with custom sample pages if requested.
- */
-export function createSampleManifest(title = 'New IIIF Transcription Project') {
+export function createLocalManifestTemplate(title = 'Illuminated Manuscript Transcriber') {
   const sampleImages = [
     {
-      label: 'Folio 1r - Introduction & Miniature',
+      label: 'Folio 1r - Frontispiece Miniature',
       url: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=1600&q=80',
       width: 1600,
       height: 2200
     },
     {
-      label: 'Folio 1v - Decorated Incunabula Text',
+      label: 'Folio 1v - Decorated Initials',
       url: 'https://images.unsplash.com/photo-1461360370896-922624d12aa1?auto=format&fit=crop&w=1600&q=80',
       width: 1600,
       height: 2150
@@ -432,3 +329,6 @@ export function createSampleManifest(title = 'New IIIF Transcription Project') {
 
   return parseIIIFManifest(rawManifest, 'local-template');
 }
+
+
+

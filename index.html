@@ -9,10 +9,24 @@
     <meta property="og:description" content="A pure JavaScript web application for loading IIIF manifests from your computer or URL, transcribing pages, adding general page notes, filtering text layers, bookmarking, and exporting valid IIIF manifest.json." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" />
+    <style>
+      @font-face {
+        font-family: 'Junicode';
+        src: url('./Junicode-Regular.otf') format('opentype');
+        font-weight: normal;
+        font-style: normal;
+        font-display: swap;
+      }
+      .font-junicode {
+        font-family: 'Junicode', serif;
+      }
+    </style>
   </head>
-  <body class="bg-white text-gray-900 antialiased">
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+  <body class="bg-gray-50 text-gray-900 antialiased h-screen overflow-hidden flex flex-col">
+    <div id="root" class="h-full flex flex-col"></div>
+    <script type="module" src="./src/main.js"></script>
   </body>
 </html>
 
