@@ -58,7 +58,7 @@ export function getCanvasImageUrl(canvas) {
           const service = body.service;
           const serviceId = getServiceId(service);
           if (serviceId) {
-            return `${serviceId.replace(/\/info\.json$/, '')}/full/1600,/0/default.jpg`;
+            return `${serviceId.replace(/\/info\.json$/, '')}/full/full/0/default.jpg`;
           }
           return body.id;
         }
@@ -71,10 +71,10 @@ export function getCanvasImageUrl(canvas) {
     const img = canvas.images[0];
     if (img.resource) {
       const res = img.resource;
-      const service = res.service;
+      const service = res.service || img.service || canvas.service;
       const serviceId = getServiceId(service);
       if (serviceId) {
-        return `${serviceId.replace(/\/info\.json$/, '')}/full/1600,/0/default.jpg`;
+        return `${serviceId.replace(/\/info\.json$/, '')}/full/full/0/default.jpg`;
       }
       if (res['@id']) return res['@id'];
       if (res.id) return res.id;

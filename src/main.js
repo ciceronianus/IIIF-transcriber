@@ -6,7 +6,7 @@
  * and JSON preview modal with tabs for Full Manifest vs Current Page Canvas.
  */
 
-import { parseIIIFManifest, SAMPLE_MANIFESTS } from './lib/iiifParser.js';
+import { parseIIIFManifest, SAMPLE_MANIFESTS } from './lib/iiifParser.js?v=20260922';
 import { buildIIIFManifest, exportManifestJsonString, downloadJsonFile } from './lib/manifestExporter.js';
 import JSZip from 'https://esm.sh/jszip@3.10.1';
 import Prism from 'https://esm.sh/prismjs@1.29.0';
